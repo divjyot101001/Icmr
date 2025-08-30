@@ -20,13 +20,14 @@ logging.basicConfig(
 
 api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
-session_string = "bot_session"  # <- fill this after first login (optional)
+session_string = None  # <- fill this after first login (optional)
 group_username = '@freeicmr'
 sherlok_username = '@Sherlok7777bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
 
 app = Flask(__name__)
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 # Use StringSession if available
 if session_string:
