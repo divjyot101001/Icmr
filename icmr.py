@@ -20,7 +20,7 @@ logging.basicConfig(
 
 api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
-session_string = ""  # <- fill this after first login (optional)
+session_string = "bot_session"  # <- fill this after first login (optional)
 group_username = '@freeicmr'
 sherlok_username = '@Sherlok7777bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
@@ -221,29 +221,27 @@ async def perform_username_search(user_input: str) -> dict:
     final_response = None
     final_response_received = asyncio.Event()
     bot_entity = await client.get_entity(sherlok_username)
-    sent_msg_id = None
 
     async def handler(event):
-        nonlocal telegram_selected, final_response, sent_msg_id
-        if event.message.reply_to_msg_id == sent_msg_id:
-            if event.message.reply_markup and not telegram_selected:
-                for row in event.message.reply_markup.rows:
-                    for button in row.buttons:
-                        if button.text.lower() == 'telegram':
-                            telegram_selected = True
-                            await event.message.click(text=button.text)
-                            break
-                    if telegram_selected:
+        nonlocal telegram_selected, final_response
+        if event.message.reply_markup and not telegram_selected:
+            for row in event.message.reply_markup.rows:
+                for button in row.buttons:
+                    if button.text.lower() == 'telegram':
+                        telegram_selected = True
+                        await event.message.click(text=button.text)
                         break
-            elif telegram_selected and not event.message.reply_markup:
-                msg_lower = event.message.message.lower()
-                if "идёт поиск" not in msg_lower and "подождите" not in msg_lower:
-                    final_response = event.message.message
-                    final_response_received.set()
+                if telegram_selected:
+                    break
+        elif telegram_selected and not event.message.reply_markup:
+            msg_lower = event.message.message.lower()
+            if "идёт поиск" not in msg_lower and "подождите" not in msg_lower:
+                final_response = event.message.message
+                final_response_received.set()
 
     async def edit_handler(event):
-        nonlocal final_response, sent_msg_id
-        if event.message.reply_to_msg_id == sent_msg_id and telegram_selected:
+        nonlocal final_response
+        if telegram_selected:
             msg_lower = event.message.message.lower()
             if "идёт поиск" not in msg_lower and "подождите" not in msg_lower:
                 final_response = event.message.message
@@ -253,8 +251,7 @@ async def perform_username_search(user_input: str) -> dict:
     client.add_event_handler(edit_handler, events.MessageEdited(from_users=bot_entity))
 
     try:
-        sent_message = await client.send_message(bot_entity, user_input)
-        sent_msg_id = sent_message.id
+        await client.send_message(bot_entity, user_input)
         try:
             await asyncio.wait_for(final_response_received.wait(), timeout=30)
         except asyncio.TimeoutError:
@@ -328,7 +325,7 @@ def root():
 
     if datetime.now() > expires:
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Expired API key: {api_key} from IP: {ip}'), loop)
-        return jupytext({"error": "API key expired"})
+        return jsonify({"error": "API key expired"})
 
     if remaining <= 0:
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'No requests left for API key: {api_key} from IP: {ip}'), loop)
