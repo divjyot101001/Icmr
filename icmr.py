@@ -10,6 +10,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 import threading
+from deep_translator import GoogleTranslator
 
 # ------------------ CONFIGURATION ------------------
 logging.basicConfig(
@@ -21,6 +22,7 @@ api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
 session_string = ""  # <- fill this after first login (optional)
 group_username = '@freeicmr'
+sherlok_username = '@Sherlok7777bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
 
 app = Flask(__name__)
@@ -52,11 +54,17 @@ async def main():
     await client.connect()
     if not await client.is_user_authorized():
         raise RuntimeError("Telethon client not authorized. Run interactively once.")
+    
     group_entity = await client.get_entity(group_username)
     await client.send_message(group_entity, "/start")
     await asyncio.sleep(2)
     logging.info(f"Sent /start to {group_username}")
-
+    
+    sherlok_entity = await client.get_entity(sherlok_username)
+    await client.send_message(sherlok_entity, "/start")
+    await asyncio.sleep(2)
+    logging.info(f"Sent /start to {sherlok_username}")
+    
     await bot.start(bot_token=bot_token)
 
     admin_id = (await client.get_me()).id
@@ -118,10 +126,10 @@ async def main():
         for row in rows:
             msg += f'Key: {row[0]}, Expires: {row[1]}, Remaining: {row[2]}, Blocked: {bool(row[3])}\n'
         await event.reply(msg)
-
+    
     await asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected())
 
-# ------------------ SEARCH FUNCTION ------------------
+# ------------------ SEARCH FUNCTION FOR FREEICMR ------------------
 async def perform_search(command: str, user_input: str) -> dict:
     final_response = None
     final_response_received = asyncio.Event()
@@ -200,7 +208,90 @@ async def perform_search(command: str, user_input: str) -> dict:
             return {"status": "error", "message": "No response received."}
 
     except FloodWaitError as e:
-        return {"status": "error", "message": f"Flood wait error: Wait {e.seconds} seconds."}
+        return {"status": "error", "message": "Wait 10 seconds before making another request"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    finally:
+        client.remove_event_handler(handler)
+        client.remove_event_handler(edit_handler)
+
+# ------------------ SEARCH FUNCTION FOR SHERLOK ------------------
+async def perform_username_search(user_input: str) -> dict:
+    telegram_selected = False
+    final_response = None
+    final_response_received = asyncio.Event()
+    bot_entity = await client.get_entity(sherlok_username)
+    sent_msg_id = None
+
+    async def handler(event):
+        nonlocal telegram_selected, final_response, sent_msg_id
+        if event.message.reply_to_msg_id == sent_msg_id:
+            if event.message.reply_markup and not telegram_selected:
+                for row in event.message.reply_markup.rows:
+                    for button in row.buttons:
+                        if button.text.lower() == 'telegram':
+                            telegram_selected = True
+                            await event.message.click(text=button.text)
+                            break
+                    if telegram_selected:
+                        break
+            elif telegram_selected and not event.message.reply_markup:
+                msg_lower = event.message.message.lower()
+                if "идёт поиск" not in msg_lower and "подождите" not in msg_lower:
+                    final_response = event.message.message
+                    final_response_received.set()
+
+    async def edit_handler(event):
+        nonlocal final_response, sent_msg_id
+        if event.message.reply_to_msg_id == sent_msg_id and telegram_selected:
+            msg_lower = event.message.message.lower()
+            if "идёт поиск" not in msg_lower and "подождите" not in msg_lower:
+                final_response = event.message.message
+                final_response_received.set()
+
+    client.add_event_handler(handler, events.NewMessage(from_users=bot_entity))
+    client.add_event_handler(edit_handler, events.MessageEdited(from_users=bot_entity))
+
+    try:
+        sent_message = await client.send_message(bot_entity, user_input)
+        sent_msg_id = sent_message.id
+        try:
+            await asyncio.wait_for(final_response_received.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            return {"status": "error", "message": "No response received (timeout)."}
+
+        if final_response:
+            try:
+                translated_text = GoogleTranslator(source='auto', target='en').translate(final_response)
+            except Exception as e:
+                translated_text = final_response
+                logging.error(f"Translation error: {str(e)}")
+
+            # Extract phone number
+            phone_match = re.search(r'Phone:\s*([0-9]+)', translated_text)
+            phone_number = phone_match.group(1) if phone_match else None
+
+            # Extract Telegram ID
+            id_match = re.search(r'ID:\s*([0-9]+)', translated_text)
+            telegram_id = id_match.group(1) if id_match else None
+
+            # Extract history changes
+            history_matches = re.findall(r'(\d{2}/\d{2}/\d{4})\s*→\s*(.*)', translated_text)
+            history = [{"date": h[0], "details": h[1]} for h in history_matches]
+
+            response_data = {
+                "status": "success",
+                "title": "Telegram User Search Result",
+                "phone_number": phone_number,
+                "telegram_id": telegram_id,
+                "history_changes": history
+            }
+            return response_data
+        else:
+            return {"status": "error", "message": "No response received."}
+
+    except FloodWaitError as e:
+        return {"status": "error", "message": "Wait 10 seconds before making another request"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
     finally:
@@ -212,11 +303,10 @@ async def perform_search(command: str, user_input: str) -> dict:
 def root():
     api_key = request.args.get('api_key')
     ip = request.remote_addr
-
     if not api_key:
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Missing API key from IP: {ip}'), loop)
         return jsonify({"error": "Please provide api_key"})
-
+    
     with db_lock:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -226,7 +316,7 @@ def root():
     if not row:
         conn.close()
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Invalid API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "Invalid API key"})
+        return jsonify({"error": "Invalid API key contact @MasterOfOsints"})
 
     expires = datetime.fromisoformat(row[0])
     remaining = row[1]
@@ -235,7 +325,7 @@ def root():
     if blocked:
         conn.close()
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Blocked API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "Invalid API key"})
+        return jsonify({"error": "Invalid API key contact @MasterOfOsints"})
 
     if datetime.now() > expires:
         conn.close()
@@ -257,12 +347,15 @@ def root():
     params = request.args.copy()
     params.pop('api_key', None)
     if not params:
-        return jsonify({"error": "Please provide a query parameter like ?num=9685748596 or ?vehicle=DL10AB1234"})
+        return jsonify({"error": "Please provide a query parameter like ?num=9685748596 or ?vehicle=DL10AB1234 or ?username=@hello"})
     if len(params) > 1:
-        return jsonify({"error": "Please provide only one query parameter."})
+        return jupytext({"error": "Please provide only one query parameter."})
     command, value = next(iter(params.items()))
 
-    future = asyncio.run_coroutine_threadsafe(perform_search(command, value), loop)
+    if command == 'username':
+        future = asyncio.run_coroutine_threadsafe(perform_username_search(value), loop)
+    else:
+        future = asyncio.run_coroutine_threadsafe(perform_search(command, value), loop)
     result = future.result()
     return jsonify(result)
 
