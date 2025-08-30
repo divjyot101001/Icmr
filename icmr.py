@@ -87,7 +87,7 @@ async def main():
         if event.sender_id != admin_id:
             return
         duration_days, max_requests = map(int, event.raw_text.split()[1:])
-        key = str(uuid.uuid4())
+        key = uuid.uuid4().hex[:16]
         now = datetime.now()
         expires = now + timedelta(days=duration_days)
         with db_lock:
@@ -312,9 +312,9 @@ def root():
         cur = conn.cursor()
         cur.execute('SELECT expires_at, remaining_requests, blocked FROM api_keys WHERE key=?', (api_key,))
         row = cur.fetchone()
+        conn.close()
 
     if not row:
-        conn.close()
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Invalid API key: {api_key} from IP: {ip}'), loop)
         return jsonify({"error": "Invalid API key contact @MasterOfOsints"})
 
@@ -323,22 +323,21 @@ def root():
     blocked = bool(row[2])
 
     if blocked:
-        conn.close()
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Blocked API key: {api_key} from IP: {ip}'), loop)
         return jsonify({"error": "Invalid API key contact @MasterOfOsints"})
 
     if datetime.now() > expires:
-        conn.close()
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'Expired API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "API key expired"})
+        return jupytext({"error": "API key expired"})
 
     if remaining <= 0:
-        conn.close()
         asyncio.run_coroutine_threadsafe(client.send_message('me', f'No requests left for API key: {api_key} from IP: {ip}'), loop)
         return jsonify({"error": "No requests left"})
 
     # Decrement remaining requests
     with db_lock:
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute('UPDATE api_keys SET remaining_requests = remaining_requests - 1 WHERE key=?', (api_key,))
         conn.commit()
         conn.close()
@@ -349,7 +348,7 @@ def root():
     if not params:
         return jsonify({"error": "Please provide a query parameter like ?num=9685748596 or ?vehicle=DL10AB1234 or ?username=@hello"})
     if len(params) > 1:
-        return jupytext({"error": "Please provide only one query parameter."})
+        return jsonify({"error": "Please provide only one query parameter."})
     command, value = next(iter(params.items()))
 
     if command == 'username':
