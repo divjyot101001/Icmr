@@ -3,7 +3,6 @@ import asyncio
 import logging
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
-from deep_translator import GoogleTranslator
 import re
 import json
 
@@ -34,7 +33,7 @@ async def init_client():
     logging.info(f"Sent /start to {group_username}")
 
 # Perform search on the bot
-async def perform_search(user_input: str) -> dict:
+async def perform_search(command: str, user_input: str) -> dict:
     final_response = None
     final_response_received = asyncio.Event()
     group_entity = await client.get_entity(group_username)
@@ -60,7 +59,7 @@ async def perform_search(user_input: str) -> dict:
     client.add_event_handler(edit_handler, events.MessageEdited(chats=group_entity))
 
     try:
-        sent_message = await client.send_message(group_entity, f"/num {user_input}")
+        sent_message = await client.send_message(group_entity, f"/{command} {user_input}")
         sent_msg_id = sent_message.id
         try:
             await asyncio.wait_for(final_response_received.wait(), timeout=30)
@@ -68,11 +67,18 @@ async def perform_search(user_input: str) -> dict:
             return {"status": "error", "message": "No response received (timeout)."}
 
         if final_response:
-            translated_text = final_response  # Assume English, no translation needed
+            translated_text = final_response
+
             # Try to parse as JSON first
             try:
                 response_data = json.loads(translated_text)
                 if isinstance(response_data, list):
+                    # Clean JSON data
+                    for record in response_data:
+                        if isinstance(record, dict):
+                            for k in list(record.keys()):
+                                if k.replace('"', '').lower() == "by" and record[k] == "TeamIntelX":
+                                    record.pop(k, None)
                     return response_data
             except json.JSONDecodeError:
                 pass
@@ -86,18 +92,23 @@ async def perform_search(user_input: str) -> dict:
                 for line in lines:
                     if ':' in line:
                         key, value = line.split(':', 1)
-                        key = key.strip().lower().replace(' ', '_').replace('father\'s_name', 'father_name')  # Normalize keys
-                        value = value.strip().strip('"')
+                        key = key.strip().strip('"').strip("'").lower().replace(' ', '_').replace('father\'s_name', 'father_name')
+                        value = value.strip().strip('"').strip("'").strip(',')
                         record[key] = value
                 if record:
-                    # Convert id to int if possible
                     if 'id' in record:
                         try:
                             record['id'] = int(record['id'])
                         except ValueError:
                             pass
                     response_data.append(record)
+
             if response_data:
+                # Remove "by": "TeamIntelX" (including quoted versions)
+                for record in response_data:
+                    for k in list(record.keys()):
+                        if k.replace('"', '').lower() == "by" and record[k] == "TeamIntelX":
+                            record.pop(k, None)
                 return response_data
             else:
                 return {"status": "error", "message": "Failed to parse response."}
@@ -115,10 +126,13 @@ async def perform_search(user_input: str) -> dict:
 # Flask route to query the bot
 @app.route("/", methods=["GET"])
 def root():
-    num = request.args.get("num")
-    if not num:
-        return jsonify({"error": "Please provide ?num=9685748596"})
-    result = loop.run_until_complete(perform_search(num))
+    params = request.args
+    if not params:
+        return jsonify({"error": "Please provide a query parameter like ?num=9685748596 or ?vehicle=DL10AB1234"})
+    if len(params) > 1:
+        return jsonify({"error": "Please provide only one query parameter."})
+    command, value = next(iter(params.items()))
+    result = loop.run_until_complete(perform_search(command, value))
     return jsonify(result)
 
 # Run the Flask server
