@@ -1,6 +1,2 @@
 Flask
-asyncio
-logging
 Telethon
-re
-json
