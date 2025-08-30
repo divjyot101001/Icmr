@@ -1,2 +1,4 @@
 Flask
-Telethon
+telethon
+deep-translator
+pysqlite3-binary
