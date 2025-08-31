@@ -1,4 +1,4 @@
 Flask
 telethon
 deep-translator
-pysqlite3-binary
+aiohttp
