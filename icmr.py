@@ -24,6 +24,7 @@ session_string = None  # <- fill this after first login (optional)
 group_username = '@freeicmr'
 sherlok_username = '@Sherlok7777bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
+new_bot_token = '8265714572:AAHnGWZl_5IhpiK9Qia27xncTyMW5iiNnFo'  # Add your new bot token here
 
 app = Flask(__name__)
 loop = asyncio.new_event_loop()
@@ -36,6 +37,7 @@ else:
     client = TelegramClient('bot_session', api_id, api_hash, loop=loop)
 
 bot = TelegramClient('bot_session_bot', api_id, api_hash, loop=loop)
+new_bot = TelegramClient('new_bot_session', api_id, api_hash, loop=loop)
 
 # ------------------ DATABASE ------------------
 db_lock = threading.Lock()
@@ -67,6 +69,7 @@ async def main():
     logging.info(f"Sent /start to {sherlok_username}")
     
     await bot.start(bot_token=bot_token)
+    await new_bot.start(bot_token=new_bot_token)
 
     admin_id = (await client.get_me()).id
 
@@ -82,7 +85,7 @@ async def main():
         conn.commit()
         conn.close()
 
-    # ----------- BOT COMMANDS -----------
+    # ----------- BOT COMMANDS (ADMIN BOT) -----------
     @bot.on(events.NewMessage(pattern=r'/genapikey (\d+) (\d+)'))
     async def gen_apikey(event):
         if event.sender_id != admin_id:
@@ -128,7 +131,64 @@ async def main():
             msg += f'Key: {row[0]}, Expires: {row[1]}, Remaining: {row[2]}, Blocked: {bool(row[3])}\n'
         await event.reply(msg)
     
-    await asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected())
+    # ----------- NEW BOT COMMANDS (USER BOT) -----------
+    commands_list = """
+Available commands:
+/num <number> - Search by number
+/aadhar <aadhar> - Search by Aadhar
+/vehicle <vehicle> - Search by vehicle
+/vnum <vnum> - Search by vnum
+/fastag <fastag> - Search by fastag
+/username <username> - Search by username
+/help - Show this list
+"""
+
+    @new_bot.on(events.NewMessage(pattern='/start'))
+    async def start_handler(event):
+        await event.reply("Welcome! Use the following commands to search.")
+        await event.reply(commands_list)
+
+    @new_bot.on(events.NewMessage(pattern='/help'))
+    async def help_handler(event):
+        await event.reply(commands_list)
+
+    @new_bot.on(events.NewMessage(pattern=r'/num (.+)'))
+    async def num_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_search('num', user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/aadhar (.+)'))
+    async def aadhar_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_search('aadhar', user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/vehicle (.+)'))
+    async def vehicle_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_search('vehicle', user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/vnum (.+)'))
+    async def vnum_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_search('vnum', user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/fastag (.+)'))
+    async def fastag_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_search('fastag', user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/username (.+)'))
+    async def username_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_username_search(user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    await asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected(), new_bot.run_until_disconnected())
 
 # ------------------ SEARCH FUNCTION FOR FREEICMR ------------------
 async def perform_search(command: str, user_input: str) -> dict:
