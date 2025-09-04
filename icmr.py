@@ -142,6 +142,7 @@ async def main():
     commands_list = """
 Available commands:
 /num <number> - Search by number
+/numv2 <number> - Search by number v2
 /aadhar <aadhar> - Search by Aadhar
 /vehicle <vehicle> - Search by vehicle
 /vnum <vnum> - Search by vnum
@@ -166,6 +167,12 @@ Available commands:
     async def num_handler(event):
         user_input = event.raw_text.split(maxsplit=1)[1]
         result = await perform_search('num', user_input)
+        await event.reply(json.dumps(result, indent=2))
+
+    @new_bot.on(events.NewMessage(pattern=r'/numv2 (.+)'))
+    async def numv2_handler(event):
+        user_input = event.raw_text.split(maxsplit=1)[1]
+        result = await perform_numv2_search(user_input)
         await event.reply(json.dumps(result, indent=2))
 
     @new_bot.on(events.NewMessage(pattern=r'/aadhar (.+)'))
@@ -392,6 +399,41 @@ async def perform_username_search(user_input: str) -> dict:
         client.remove_event_handler(handler)
         client.remove_event_handler(edit_handler)
 
+# ------------------ SEARCH FUNCTION FOR NUMV2 ------------------
+async def perform_numv2_search(mobile: str) -> dict:
+    url = "https://paiduserweb.onrender.com/search-mobile"
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "sec-ch-ua-platform": "Android",
+                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+                "sec-ch-ua": '"Not;A=Brand";v="99", "Google Chrome";v="139", "Chromium";v="139"',
+                "content-type": "application/json",
+                "sec-ch-ua-mobile": "?1",
+                "accept": "*/*",
+                "origin": "https://paiduserweb.onrender.com",
+                "sec-fetch-site": "same-origin",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-dest": "empty",
+                "referer": "https://paiduserweb.onrender.com/",
+                "accept-encoding": "gzip, deflate, br, zstd",
+                "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+                "priority": "u=1, i"
+            }
+            data = {"mobile": mobile}
+            async with session.post(url, headers=headers, json=data) as response:
+                if response.status == 200:
+                    try:
+                        result = await response.json()
+                        return {"status": "success", "data": result}
+                    except aiohttp.ContentTypeError:
+                        text = await response.text()
+                        return {"status": "success", "message": text}
+                else:
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # ------------------ SEARCH FUNCTION FOR FAM ------------------
 async def perform_fam_search(user_input: str) -> dict:
     url = f"https://revolutionary-cowboy-attacks-usr.trycloudflare.com/?upi={user_input}"
@@ -483,34 +525,6 @@ def root():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT expires_at, remaining_requests, blocked FROM api_keys WHERE key=?', (api_key,))
-        row = cur.fetchone()
-        conn.close()
-
-    if not row:
-        asyncio.run_coroutine_threadsafe(client.send_message('me', f'Invalid API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "Invalid API key contact @MasterOfOsints"})
-
-    expires = datetime.fromisoformat(row[0])
-    remaining = row[1]
-    blocked = bool(row[2])
-
-    if blocked:
-        asyncio.run_coroutine_threadsafe(client.send_message('me', f'Blocked API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "Invalid API key contact @MasterOfOsints"})
-
-    if datetime.now() > expires:
-        asyncio.run_coroutine_threadsafe(client.send_message('me', f'Expired API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "API key expired"})
-
-    if remaining <= 0:
-        asyncio.run_coroutine_threadsafe(client.send_message('me', f'No requests left for API key: {api_key} from IP: {ip}'), loop)
-        return jsonify({"error": "No requests left"})
-
-    # Decrement remaining requests
-    with db_lock:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('UPDATE api_keys SET remaining_requests = remaining_requests - 1 WHERE key=?', (api_key,))
         conn.commit()
         conn.close()
     vacuum_db()
@@ -546,6 +560,9 @@ def root():
             if result2['status'] != 'success':
                 errors.append(result2['message'])
             result = {"status": "error", "message": " ".join(errors)}
+    elif command == 'numv2':
+        future = asyncio.run_coroutine_threadsafe(perform_numv2_search(value), loop)
+        result = future.result()
     else:
         future = asyncio.run_coroutine_threadsafe(perform_search(command, value), loop)
         result = future.result()
