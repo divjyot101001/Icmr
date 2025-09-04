@@ -26,7 +26,7 @@ group_username = '@freeicmr'
 sherlok_username = '@Sherlok7777bot'
 paradox_username = '@paradoxbomber_bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
-new_bot_token = '8265714572:AAHnGWZl_5IhpiK9Qia27xncTyMW5iiNnFo'  # Add your new bot token here
+new_bot_token = '8497305791:AAG-2EI9lcufYDu7H5ELeh0D3zQ39xyNEjA'  # Add your new bot token here
 
 app = Flask(__name__)
 loop = asyncio.new_event_loop()
