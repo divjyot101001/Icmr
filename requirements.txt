@@ -2,3 +2,5 @@ Flask
 telethon
 deep-translator
 aiohttp
+brotli
+brotlicffi

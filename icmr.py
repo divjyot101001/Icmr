@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import threading
 from deep_translator import GoogleTranslator
 import aiohttp
+import brotli
 
 # ------------------ CONFIGURATION ------------------
 logging.basicConfig(
@@ -423,12 +424,18 @@ async def perform_numv2_search(mobile: str) -> dict:
             data = {"mobile": mobile}
             async with session.post(url, headers=headers, json=data) as response:
                 if response.status == 200:
+                    content = await response.read()
+                    encoding = response.headers.get('content-encoding')
+                    if encoding == 'br':
+                        try:
+                            content = brotli.decompress(content)
+                        except Exception as e:
+                            return {"status": "error", "message": f"Brotli decompression failed: {str(e)}"}
                     try:
-                        result = await response.json()
+                        result = json.loads(content.decode('utf-8'))
                         return {"status": "success", "data": result}
-                    except aiohttp.ContentTypeError:
-                        text = await response.text()
-                        return {"status": "success", "message": text}
+                    except json.JSONDecodeError:
+                        return {"status": "success", "message": content.decode('utf-8')}
                 else:
                     return {"status": "error", "message": f"HTTP {response.status}"}
     except Exception as e:
