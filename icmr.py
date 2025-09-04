@@ -394,7 +394,7 @@ async def perform_username_search(user_input: str) -> dict:
 
 # ------------------ SEARCH FUNCTION FOR FAM ------------------
 async def perform_fam_search(user_input: str) -> dict:
-    url = f"https://financing-firm-adapter-page.trycloudflare.com/?upi={user_input}"
+    url = f"https://revolutionary-cowboy-attacks-usr.trycloudflare.com/?upi={user_input}"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
