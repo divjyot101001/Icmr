@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 import asyncio
 import logging
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError
+from telethon.tl.functions.channels import GetParticipantRequest
 from telethon.sessions import StringSession
 import re
 import json
@@ -23,11 +24,12 @@ logging.basicConfig(
 api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
 session_string = None  # <- fill this after first login (optional)
-group_username = '@freeicmr'
+group_username = '@wvizgseisbxuodebwydoxn'
 sherlok_username = '@Sherlok7777bot'
 paradox_username = '@paradoxbomber_bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
 new_bot_token = '8497305791:AAG-2EI9lcufYDu7H5ELeh0D3zQ39xyNEjA'  # Add your new bot token here
+channel_link = 'https://t.me/+TBXF1J0KQQ82Yzll'
 
 app = Flask(__name__)
 loop = asyncio.new_event_loop()
@@ -80,6 +82,7 @@ async def main():
     await new_bot.start(bot_token=new_bot_token)
 
     admin_id = (await client.get_me()).id
+    channel_entity = await new_bot.get_entity(channel_link)
 
     # Initialize database
     with db_lock:
@@ -90,8 +93,24 @@ async def main():
             remaining_requests INTEGER,
             blocked INTEGER DEFAULT 0
         )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY
+        )''')
         conn.commit()
         conn.close()
+
+    async def is_member(user_id):
+        try:
+            await new_bot(GetParticipantRequest(channel=channel_entity, participant=user_id))
+            return True
+        except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError):
+            return False
+
+    async def check_membership(event):
+        if await is_member(event.sender_id):
+            return True
+        await event.reply(f"🔒 Please join our channel first to use the bot:\n{channel_link}\n\nAfter joining, send /start again. ✅")
+        return False
 
     # ----------- BOT COMMANDS (ADMIN BOT) -----------
     @bot.on(events.NewMessage(pattern=r'/genapikey (\d+) (\d+)'))
@@ -138,99 +157,272 @@ async def main():
         for row in rows:
             msg += f'Key: {row[0]}, Expires: {row[1]}, Remaining: {row[2]}, Blocked: {bool(row[3])}\n'
         await event.reply(msg)
-    
+
+    @bot.on(events.NewMessage(pattern=r'/broadcast (.+)'))
+    async def broadcast_handler(event):
+        if event.sender_id != admin_id:
+            return
+        message = event.raw_text.split(maxsplit=1)[1]
+        with db_lock:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute('SELECT user_id FROM users')
+            users = [row[0] for row in cur.fetchall()]
+            conn.close()
+        if not users:
+            await event.reply("❌ No users to broadcast to.")
+            return
+        results = await asyncio.gather(*[new_bot.send_message(user_id, f"📢 Broadcast: {message}") for user_id in users], return_exceptions=True)
+        sent = sum(1 for r in results if not isinstance(r, Exception))
+        failed = len(users) - sent
+        await event.reply(f"✅ Broadcast sent to {sent} users, failed: {failed}")
+
     # ----------- NEW BOT COMMANDS (USER BOT) -----------
     commands_list = """
-Available commands:
-/num <number> - Search by number
-/numv2 <number> - Search by number v2
-/aadhar <aadhar> - Search by Aadhar
-/vehicle <vehicle> - Search by vehicle
-/vnum <vnum> - Search by vnum
-/fastag <fastag> - Search by fastag
-/username <username> - Search by username
-/fam <fam id> - Search by fam
-/upibomb <upi id> - Validate UPI ID
-/bomb <10 digits number> - Send SMS verification
+🚀 Available commands:
+
+🔍 /num <number> - Search by number (e.g., /num 9685748596)
+🔍 /numv2 <number> - Search by number v2
+🆔 /aadhar <aadhar> - Search by Aadhar (e.g., /aadhar 123456789012)
+🚗 /vehicle <vehicle> - Search by vehicle (e.g., /vehicle HR26EV0001)
+🏷️ /fastag <fastag> - Search by fastag
+👤 /userv2 <username> - Search by username (e.g., /userv2 @hello)
+👨‍👩‍👧 /fam <fam id> - Search by fam (e.g., /fam rohit@fam)
+💳 /upibomb <upi id> - Validate UPI ID (e.g., /upibomb rohit@fam)
+💣 /bomb <10 digits number> - Send SMS verification (e.g., /bomb 9685748596)
 /help - Show this list
-"""
+    """
 
     @new_bot.on(events.NewMessage(pattern='/start'))
     async def start_handler(event):
-        await event.reply("Welcome! Use the following commands to search.")
+        if not await is_member(event.sender_id):
+            await event.reply(f"🔒 Please join our channel first to use the bot:\n{channel_link}\n\nAfter joining, send /start again. ✅")
+            return
+        await event.reply("🚀 Welcome to the Advanced Search Bot! ✅\n\nUse /help for available commands.")
         await event.reply(commands_list)
+        with db_lock:
+            conn = get_db_connection()
+            conn.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (event.sender_id,))
+            conn.commit()
+            conn.close()
 
     @new_bot.on(events.NewMessage(pattern='/help'))
     async def help_handler(event):
+        if not await check_membership(event):
+            return
         await event.reply(commands_list)
 
-    @new_bot.on(events.NewMessage(pattern=r'/num (.+)'))
+    async def send_examples(event):
+        await event.reply("❌ Please provide the required input!\n\nExamples:\n/num 9685748596\n/vehicle HR26EV0001\n/userv2 @hello\n/aadhar 123456789012\n/bomb 9685748596\n/upibomb rohit@fam\n/fam rohit@fam")
+
+    @new_bot.on(events.NewMessage(pattern=r'/num'))
     async def num_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_search('num', user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_search('num', user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result if isinstance(result, list) else result.get('data', {})
+                formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                await searching_msg.edit(formatted)
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/numv2 (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/numv2'))
     async def numv2_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_numv2_search(user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_numv2_search(user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result.get('data', {})
+                if data:
+                    formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                    await searching_msg.edit(formatted)
+                else:
+                    await searching_msg.edit("✅ Search completed. No data found.")
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/aadhar (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/aadhar'))
     async def aadhar_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_search('aadhar', user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_search('aadhar', user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result if isinstance(result, list) else result.get('data', {})
+                formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                await searching_msg.edit(formatted)
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/vehicle (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/vehicle'))
     async def vehicle_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_search('vehicle', user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_search('vehicle', user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result if isinstance(result, list) else result.get('data', {})
+                formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                await searching_msg.edit(formatted)
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/vnum (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/vnum'))
     async def vnum_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_search('vnum', user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_search('vnum', user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result if isinstance(result, list) else result.get('data', {})
+                formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                await searching_msg.edit(formatted)
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/fastag (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/fastag'))
     async def fastag_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_search('fastag', user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_search('fastag', user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result if isinstance(result, list) else result.get('data', {})
+                formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                await searching_msg.edit(formatted)
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/username (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/userv2'))
     async def username_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_username_search(user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if event.is_group:
+            await event.reply("❌ This command can only be used in personal chat (limited requests). 👤")
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_username_search(user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                data = result
+                formatted = f"✅ User Search Results:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                await searching_msg.edit(formatted)
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/fam (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/fam'))
     async def fam_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_fam_search(user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_fam_search(user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                if 'data' in result or isinstance(result, dict):
+                    data = result.get('data', result)
+                    formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+                    await searching_msg.edit(formatted)
+                else:
+                    await searching_msg.edit(f"✅ {result.get('message', 'Done')} 👍")
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/upibomb (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/upibomb'))
     async def upibomb_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        result = await perform_upi_validation(user_input)
-        await event.reply(json.dumps(result, indent=2))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("🔍 Validating UPI... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            result = await perform_upi_validation(user_input)
+            if result.get('status') == 'error':
+                await searching_msg.edit(f"❌ {result['message']}")
+            else:
+                await searching_msg.edit("✅ UPI BOMBING DONE SUCCESSFULLY 👍🏻")
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/bomb (.+)'))
+    @new_bot.on(events.NewMessage(pattern=r'/bomb'))
     async def bomb_handler(event):
-        user_input = event.raw_text.split(maxsplit=1)[1]
-        results = await asyncio.gather(
-            perform_sms_verify(user_input),
-            perform_paradox_sms_verify(user_input)
-        )
-        # Check if both succeeded
-        if all(r['status'] == 'success' for r in results):
-            await event.reply("SMS VERIFICATION SENT SUCCESSFULLY ✅👍🏻")
-        else:
-            errors = [r['message'] for r in results if r['status'] != 'success']
-            await event.reply(json.dumps({"status": "error", "message": " ".join(errors)}))
+        if not await check_membership(event):
+            return
+        if len(event.raw_text.split()) < 2:
+            await send_examples(event)
+            return
+        searching_msg = await event.reply("💣 Sending SMS verifications... Please wait. ⏳")
+        try:
+            user_input = event.raw_text.split(maxsplit=1)[1]
+            results = await asyncio.gather(
+                perform_sms_verify(user_input),
+                perform_paradox_sms_verify(user_input)
+            )
+            if all(r['status'] == 'success' for r in results):
+                await searching_msg.edit("✅ HARD SMS+CALL+WP BOMBING DONE SUCCESSFULLY 👍🏻")
+            else:
+                errors = [r['message'] for r in results if r['status'] != 'success']
+                await searching_msg.edit(f"❌ Errors: {' '.join(errors)}")
+        except Exception as e:
+            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
     await asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected(), new_bot.run_until_disconnected())
 
@@ -523,15 +715,33 @@ async def perform_paradox_sms_verify(user_input: str) -> dict:
 @app.route("/", methods=["GET"])
 def root():
     api_key = request.args.get('api_key')
-    ip = request.remote_addr
     if not api_key:
-        asyncio.run_coroutine_threadsafe(client.send_message('me', f'Missing API key from IP: {ip}'), loop)
         return jsonify({"error": "Please provide api_key"})
     
     with db_lock:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT expires_at, remaining_requests, blocked FROM api_keys WHERE key=?', (api_key,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "Invalid API key"})
+        expires_at, remaining_requests, blocked = row
+        if blocked == 1:
+            conn.close()
+            return jsonify({"error": "API key blocked"})
+        try:
+            expires = datetime.fromisoformat(expires_at)
+            if expires < datetime.now():
+                conn.close()
+                return jsonify({"error": "API key expired"})
+        except ValueError:
+            conn.close()
+            return jsonify({"error": "Invalid API key"})
+        if remaining_requests <= 0:
+            conn.close()
+            return jsonify({"error": "No requests remaining"})
+        cur.execute('UPDATE api_keys SET remaining_requests = remaining_requests - 1 WHERE key=?', (api_key,))
         conn.commit()
         conn.close()
     vacuum_db()
