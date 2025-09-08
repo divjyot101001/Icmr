@@ -62,6 +62,7 @@ def vacuum_db():
 
 # ------------------ TELETHON MAIN ------------------
 async def main():
+    global owner_id
     await client.connect()
     if not await client.is_user_authorized():
         raise RuntimeError("Telethon client not authorized. Run interactively once to login as user and get session string.")
@@ -700,7 +701,7 @@ def root():
                 return jsonify({"error": "API key expired"})
         except ValueError:
             conn.close()
-            return jupytext({"error": "Invalid API key"})
+            return jsonify({"error": "Invalid API key"})
         if remaining_requests <= 0:
             conn.close()
             return jsonify({"error": "No requests remaining"})
