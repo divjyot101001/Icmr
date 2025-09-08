@@ -4,6 +4,7 @@ import logging
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError
 from telethon.tl.functions.channels import GetParticipantRequest
+from telethon.tl.functions.messages import CheckChatInviteRequest
 from telethon.sessions import StringSession
 import re
 import json
@@ -23,7 +24,7 @@ logging.basicConfig(
 
 api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
-session_string = None  # <- fill this after first login (optional)
+session_string = "your_user_session_string_here"  # Paste your user session string here to fix the bot restriction error
 group_username = '@wvizgseisbxuodebwydoxn'
 sherlok_username = '@Sherlok7777bot'
 paradox_username = '@paradoxbomber_bot'
@@ -39,7 +40,7 @@ asyncio.set_event_loop(loop)
 if session_string:
     client = TelegramClient(StringSession(session_string), api_id, api_hash, loop=loop)
 else:
-    client = TelegramClient('bot_session', api_id, api_hash, loop=loop)
+    client = TelegramClient('user_session', api_id, api_hash, loop=loop)  # Changed to 'user_session' to avoid confusion
 
 bot = TelegramClient('bot_session_bot', api_id, api_hash, loop=loop)
 new_bot = TelegramClient('new_bot_session', api_id, api_hash, loop=loop)
@@ -61,7 +62,7 @@ def vacuum_db():
 async def main():
     await client.connect()
     if not await client.is_user_authorized():
-        raise RuntimeError("Telethon client not authorized. Run interactively once.")
+        raise RuntimeError("Telethon client not authorized. Run interactively once to login as user and get session string.")
     
     group_entity = await client.get_entity(group_username)
     await client.send_message(group_entity, "/start")
@@ -82,7 +83,14 @@ async def main():
     await new_bot.start(bot_token=new_bot_token)
 
     admin_id = (await client.get_me()).id
-    channel_entity = await new_bot.get_entity(channel_link)
+
+    # Get channel entity using CheckChatInviteRequest to handle private channel
+    channel_hash = channel_link.split('+')[1]
+    invite = await client(CheckChatInviteRequest(hash=channel_hash))
+    if hasattr(invite, 'chat'):
+        channel_entity = invite.chat
+    else:
+        raise RuntimeError("User not joined to the channel. Join the channel with your user account first: " + channel_link)
 
     # Initialize database
     with db_lock:
@@ -101,7 +109,7 @@ async def main():
 
     async def is_member(user_id):
         try:
-            await new_bot(GetParticipantRequest(channel=channel_entity, participant=user_id))
+            await client(GetParticipantRequest(channel=channel_entity, participant=user_id))
             return True
         except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError):
             return False
