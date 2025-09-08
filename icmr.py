@@ -85,6 +85,9 @@ async def main():
     await bot.start(bot_token=bot_token)
     await new_bot.start(bot_token=new_bot_token)
 
+    bot_me = await new_bot.get_me()
+    bot_username = '@' + bot_me.username
+
     if owner_id is None:
         owner_id = (await client.get_me()).id
 
@@ -99,7 +102,11 @@ async def main():
     channel_id = user_channel_entity.id  # Channel ID line for easy reference
 
     # Fetch the channel entity from the bot's perspective to get the correct access_hash
-    channel_entity = await new_bot.get_entity(PeerChannel(user_channel_entity.id))
+    try:
+        channel_entity = await new_bot.get_entity(PeerChannel(user_channel_entity.id))
+    except Exception as e:
+        raise RuntimeError(f"Could not get channel entity for the bot. Please manually add the bot {bot_username} as an administrator to the channel using the invite link: {channel_link}. Error: {str(e)}")
+
     channel_input = InputChannel(channel_entity.id, channel_entity.access_hash)
 
     # Note: Make sure to add the new_bot (the bot with new_bot_token) to the channel as an administrator so it can check memberships.
