@@ -6,7 +6,7 @@ from telethon.errors import FloodWaitError, UserNotParticipantError, ChannelPriv
 from telethon.tl.functions.channels import GetParticipantRequest
 from telethon.tl.functions.messages import CheckChatInviteRequest
 from telethon.sessions import StringSession
-from telethon.tl.types import InputChannel
+from telethon.tl.types import InputChannel, PeerChannel
 import re
 import json
 import sqlite3
@@ -98,10 +98,11 @@ async def main():
 
     channel_id = user_channel_entity.id  # Channel ID line for easy reference
 
-    # Note: Make sure to add the new_bot (the bot with new_bot_token) to the channel as an administrator so it can check memberships.
+    # Fetch the channel entity from the bot's perspective to get the correct access_hash
+    channel_entity = await new_bot.get_entity(PeerChannel(user_channel_entity.id))
+    channel_input = InputChannel(channel_entity.id, channel_entity.access_hash)
 
-    # Create InputChannel for bot to use
-    channel_input = InputChannel(user_channel_entity.id, user_channel_entity.access_hash)
+    # Note: Make sure to add the new_bot (the bot with new_bot_token) to the channel as an administrator so it can check memberships.
 
     # Initialize database
     with db_lock:
@@ -120,7 +121,8 @@ async def main():
 
     async def is_member(user_id):
         try:
-            await new_bot(GetParticipantRequest(channel=channel_input, participant=user_id))
+            participant = await new_bot.get_input_entity(user_id)  # Ensure participant is InputPeer
+            await new_bot(GetParticipantRequest(channel=channel_input, participant=participant))
             return True
         except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError, ValueError, TypeError) as e:
             logging.error(f"Error checking membership for user {user_id}: {str(e)}")
