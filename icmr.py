@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify
 import asyncio
 import logging
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.errors import FloodWaitError, UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError
 from telethon.tl.functions.channels import GetParticipantRequest
 from telethon.tl.functions.messages import CheckChatInviteRequest
 from telethon.sessions import StringSession
+from telethon.tl.types import InputChannel
 import re
 import json
 import sqlite3
@@ -31,6 +32,7 @@ paradox_username = '@paradoxbomber_bot'
 bot_token = '8454361876:AAH_fRlPZICNBkPOptJX1EwIJ4gbZKLyzYk'
 new_bot_token = '8497305791:AAG-2EI9lcufYDu7H5ELeh0D3zQ39xyNEjA'  # Add your new bot token here
 channel_link = 'https://t.me/+TBXF1J0KQQ82Yzll'
+owner_id = 7806244231  # Add your Telegram user ID here (e.g., 123456789)
 
 app = Flask(__name__)
 loop = asyncio.new_event_loop()
@@ -82,7 +84,8 @@ async def main():
     await bot.start(bot_token=bot_token)
     await new_bot.start(bot_token=new_bot_token)
 
-    owner_id = (await client.get_me()).id
+    if owner_id is None:
+        owner_id = (await client.get_me()).id
 
     # Get channel entity using user client
     channel_hash = channel_link.split('+')[1]
@@ -92,18 +95,12 @@ async def main():
     else:
         raise RuntimeError("User not joined to the channel. Join the channel with your user account first: " + channel_link)
 
-    channel_id = user_channel_entity.id
+    channel_id = user_channel_entity.id  # Channel ID line for easy reference
 
     # Note: Make sure to add the new_bot (the bot with new_bot_token) to the channel as an administrator so it can check memberships.
 
-    # Get channel entity for new_bot by finding it in dialogs
-    channel_entity = None
-    async for dialog in new_bot.iter_dialogs():
-        if dialog.id == channel_id:
-            channel_entity = dialog.entity
-            break
-    if channel_entity is None:
-        raise RuntimeError("Bot not added to the channel. Add the bot as admin to the channel first.")
+    # Create InputChannel for bot to use
+    channel_input = InputChannel(user_channel_entity.id, user_channel_entity.access_hash)
 
     # Initialize database
     with db_lock:
@@ -122,7 +119,7 @@ async def main():
 
     async def is_member(user_id):
         try:
-            await new_bot(GetParticipantRequest(channel=channel_entity, participant=user_id))
+            await new_bot(GetParticipantRequest(channel=channel_input, participant=user_id))
             return True
         except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError, ValueError, TypeError) as e:
             logging.error(f"Error checking membership for user {user_id}: {str(e)}")
@@ -134,7 +131,10 @@ async def main():
     async def check_membership(event):
         if await is_member(event.sender_id):
             return True
-        await event.reply(f"🔒 Please join our channel first to use the bot:\n{channel_link}\n\nAfter joining, send /start again. ✅")
+        await event.reply(
+            "🔒 Please join our channel first to use the bot:\n\nAfter joining, send /start again. ✅",
+            buttons=Button.url("Join Channel", channel_link)
+        )
         return False
 
     # ----------- BOT COMMANDS (ADMIN BOT) -----------
@@ -207,7 +207,6 @@ async def main():
 🚀 Available commands:
 
 🔍 /num <number> - Search by number (e.g., /num 9685748596)
-🔍 /numv2 <number> - Search by number v2
 🆔 /aadhar <aadhar> - Search by Aadhar (e.g., /aadhar 123456789012)
 🚗 /vehicle <vehicle> - Search by vehicle (e.g., /vehicle HR26EV0001)
 🏷️ /fastag <fastag> - Search by fastag
@@ -221,7 +220,10 @@ async def main():
     @new_bot.on(events.NewMessage(pattern='/start'))
     async def start_handler(event):
         if not await is_member(event.sender_id):
-            await event.reply(f"🔒 Please join our channel first to use the bot:\n{channel_link}\n\nAfter joining, send /start again. ✅")
+            await event.reply(
+                "🔒 Please join our channel first to use the bot:\n\nAfter joining, send /start again. ✅",
+                buttons=Button.url("Join Channel", channel_link)
+            )
             return
         await event.reply("🚀 Welcome to the Advanced Search Bot! ✅\n\nUse /help for available commands.")
         await event.reply(commands_list)
@@ -257,29 +259,6 @@ async def main():
                 data = result if isinstance(result, list) else result.get('data', {})
                 formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
                 await searching_msg.edit(formatted)
-        except Exception as e:
-            await searching_msg.edit(f"❌ An error occurred: {str(e)}")
-
-    @new_bot.on(events.NewMessage(pattern=r'/numv2'))
-    async def numv2_handler(event):
-        if not await check_membership(event):
-            return
-        if len(event.raw_text.split()) < 2:
-            await send_examples(event)
-            return
-        searching_msg = await event.reply("🔍 Searching... Please wait. ⏳")
-        try:
-            user_input = event.raw_text.split(maxsplit=1)[1]
-            result = await perform_numv2_search(user_input)
-            if result.get('status') == 'error':
-                await searching_msg.edit(f"❌ {result['message']}")
-            else:
-                data = result.get('data', {})
-                if data:
-                    formatted = f"✅ Results found:\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
-                    await searching_msg.edit(formatted)
-                else:
-                    await searching_msg.edit("✅ Search completed. No data found.")
         except Exception as e:
             await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
@@ -617,47 +596,6 @@ async def perform_username_search(user_input: str) -> dict:
         client.remove_event_handler(handler)
         client.remove_event_handler(edit_handler)
 
-# ------------------ SEARCH FUNCTION FOR NUMV2 ------------------
-async def perform_numv2_search(mobile: str) -> dict:
-    url = "https://paiduserweb.onrender.com/search-mobile"
-    try:
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                "sec-ch-ua-platform": "Android",
-                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-                "sec-ch-ua": '"Not;A=Brand";v="99", "Google Chrome";v="139", "Chromium";v="139"',
-                "content-type": "application/json",
-                "sec-ch-ua-mobile": "?1",
-                "accept": "*/*",
-                "origin": "https://paiduserweb.onrender.com",
-                "sec-fetch-site": "same-origin",
-                "sec-fetch-mode": "cors",
-                "sec-fetch-dest": "empty",
-                "referer": "https://paiduserweb.onrender.com/",
-                "accept-encoding": "gzip, deflate, br, zstd",
-                "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
-                "priority": "u=1, i"
-            }
-            data = {"mobile": mobile}
-            async with session.post(url, headers=headers, json=data) as response:
-                if response.status == 200:
-                    content = await response.read()
-                    encoding = response.headers.get('content-encoding')
-                    if encoding == 'br':
-                        try:
-                            content = brotli.decompress(content)
-                        except Exception as e:
-                            return {"status": "error", "message": f"Brotli decompression failed: {str(e)}"}
-                    try:
-                        result = json.loads(content.decode('utf-8'))
-                        return {"status": "success", "data": result}
-                    except json.JSONDecodeError:
-                        return {"status": "success", "message": content.decode('utf-8')}
-                else:
-                    return {"status": "error", "message": f"HTTP {response.status}"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 # ------------------ SEARCH FUNCTION FOR FAM ------------------
 async def perform_fam_search(user_input: str) -> dict:
     url = f"https://revolutionary-cowboy-attacks-usr.trycloudflare.com/?upi={user_input}"
@@ -762,7 +700,7 @@ def root():
                 return jsonify({"error": "API key expired"})
         except ValueError:
             conn.close()
-            return jsonify({"error": "Invalid API key"})
+            return jupytext({"error": "Invalid API key"})
         if remaining_requests <= 0:
             conn.close()
             return jsonify({"error": "No requests remaining"})
@@ -802,9 +740,6 @@ def root():
             if result2['status'] != 'success':
                 errors.append(result2['message'])
             result = {"status": "error", "message": " ".join(errors)}
-    elif command == 'numv2':
-        future = asyncio.run_coroutine_threadsafe(perform_numv2_search(value), loop)
-        result = future.result()
     else:
         future = asyncio.run_coroutine_threadsafe(perform_search(command, value), loop)
         result = future.result()
