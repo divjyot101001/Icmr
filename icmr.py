@@ -131,7 +131,9 @@ async def main():
             participant = await new_bot.get_input_entity(user_id)  # Ensure participant is InputPeer
             await new_bot(GetParticipantRequest(channel=channel_input, participant=participant))
             return True
-        except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError, ValueError, TypeError) as e:
+        except UserNotParticipantError:
+            return False
+        except (ChannelPrivateError, ChatAdminRequiredError, ValueError, TypeError) as e:
             logging.error(f"Error checking membership for user {user_id}: {str(e)}")
             return False
         except Exception as e:
@@ -263,7 +265,7 @@ async def main():
         try:
             user_input = event.raw_text.split(maxsplit=1)[1]
             result = await perform_search('num', user_input)
-            if result.get('status') == 'error':
+            if isinstance(result, dict) and result.get('status') == 'error':
                 await searching_msg.edit(f"❌ {result['message']}")
             else:
                 data = result if isinstance(result, list) else result.get('data', {})
@@ -283,7 +285,7 @@ async def main():
         try:
             user_input = event.raw_text.split(maxsplit=1)[1]
             result = await perform_search('aadhar', user_input)
-            if result.get('status') == 'error':
+            if isinstance(result, dict) and result.get('status') == 'error':
                 await searching_msg.edit(f"❌ {result['message']}")
             else:
                 data = result if isinstance(result, list) else result.get('data', {})
@@ -303,7 +305,7 @@ async def main():
         try:
             user_input = event.raw_text.split(maxsplit=1)[1]
             result = await perform_search('vehicle', user_input)
-            if result.get('status') == 'error':
+            if isinstance(result, dict) and result.get('status') == 'error':
                 await searching_msg.edit(f"❌ {result['message']}")
             else:
                 data = result if isinstance(result, list) else result.get('data', {})
@@ -323,7 +325,7 @@ async def main():
         try:
             user_input = event.raw_text.split(maxsplit=1)[1]
             result = await perform_search('vnum', user_input)
-            if result.get('status') == 'error':
+            if isinstance(result, dict) and result.get('status') == 'error':
                 await searching_msg.edit(f"❌ {result['message']}")
             else:
                 data = result if isinstance(result, list) else result.get('data', {})
@@ -343,7 +345,7 @@ async def main():
         try:
             user_input = event.raw_text.split(maxsplit=1)[1]
             result = await perform_search('fastag', user_input)
-            if result.get('status') == 'error':
+            if isinstance(result, dict) and result.get('status') == 'error':
                 await searching_msg.edit(f"❌ {result['message']}")
             else:
                 data = result if isinstance(result, list) else result.get('data', {})
