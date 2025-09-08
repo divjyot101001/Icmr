@@ -222,7 +222,6 @@ async def main():
 🆔 /aadhar <aadhar> - Search by Aadhar (e.g., /aadhar 123456789012)
 🚗 /vehicle <vehicle> - Search by vehicle (e.g., /vehicle HR26EV0001)
 🏷️ /fastag <fastag> - Search by fastag
-👤 /userv2 <username> - Search by username (e.g., /userv2 @hello)
 👨‍👩‍👧 /fam <fam id> - Search by fam (e.g., /fam rohit@fam)
 💳 /upibomb <upi id> - Validate UPI ID (e.g., /upibomb rohit@fam)
 💣 /bomb <10 digits number> - Send SMS verification (e.g., /bomb 9685748596)
@@ -252,7 +251,7 @@ async def main():
         await event.reply(commands_list)
 
     async def send_examples(event):
-        await event.reply("❌ Please provide the required input!\n\nExamples:\n/num 9685748596\n/vehicle HR26EV0001\n/userv2 @hello\n/aadhar 123456789012\n/bomb 9685748596\n/upibomb rohit@fam\n/fam rohit@fam")
+        await event.reply("❌ Please provide the required input!\n\nExamples:\n/num 9685748596\n/vehicle HR26EV0001\n/aadhar 123456789012\n/bomb 9685748596\n/upibomb rohit@fam\n/fam rohit@fam")
 
     @new_bot.on(events.NewMessage(pattern=r'/num'))
     async def num_handler(event):
@@ -354,7 +353,7 @@ async def main():
         except Exception as e:
             await searching_msg.edit(f"❌ An error occurred: {str(e)}")
 
-    @new_bot.on(events.NewMessage(pattern=r'/userv2'))
+    @new_bot.on(events.NewMessage(pattern=r'/sherlock'))
     async def username_handler(event):
         if not await check_membership(event):
             return
