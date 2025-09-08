@@ -24,7 +24,7 @@ logging.basicConfig(
 
 api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
-session_string = None  # Paste your user session string here to fix the bot restriction error
+session_string = "your_user_session_string_here"  # Paste your user session string here
 group_username = '@wvizgseisbxuodebwydoxn'
 sherlok_username = '@Sherlok7777bot'
 paradox_username = '@paradoxbomber_bot'
@@ -40,7 +40,7 @@ asyncio.set_event_loop(loop)
 if session_string:
     client = TelegramClient(StringSession(session_string), api_id, api_hash, loop=loop)
 else:
-    client = TelegramClient('user_session', api_id, api_hash, loop=loop)  # Changed to 'user_session' to avoid confusion
+    client = TelegramClient('user_session', api_id, api_hash, loop=loop)
 
 bot = TelegramClient('bot_session_bot', api_id, api_hash, loop=loop)
 new_bot = TelegramClient('new_bot_session', api_id, api_hash, loop=loop)
@@ -82,15 +82,28 @@ async def main():
     await bot.start(bot_token=bot_token)
     await new_bot.start(bot_token=new_bot_token)
 
-    admin_id = (await client.get_me()).id
+    owner_id = (await client.get_me()).id
 
-    # Get channel entity using CheckChatInviteRequest to handle private channel
+    # Get channel entity using user client
     channel_hash = channel_link.split('+')[1]
     invite = await client(CheckChatInviteRequest(hash=channel_hash))
     if hasattr(invite, 'chat'):
-        channel_entity = invite.chat
+        user_channel_entity = invite.chat
     else:
         raise RuntimeError("User not joined to the channel. Join the channel with your user account first: " + channel_link)
+
+    channel_id = user_channel_entity.id
+
+    # Note: Make sure to add the new_bot (the bot with new_bot_token) to the channel as an administrator so it can check memberships.
+
+    # Get channel entity for new_bot by finding it in dialogs
+    channel_entity = None
+    async for dialog in new_bot.iter_dialogs():
+        if dialog.id == channel_id:
+            channel_entity = dialog.entity
+            break
+    if channel_entity is None:
+        raise RuntimeError("Bot not added to the channel. Add the bot as admin to the channel first.")
 
     # Initialize database
     with db_lock:
@@ -109,9 +122,13 @@ async def main():
 
     async def is_member(user_id):
         try:
-            await client(GetParticipantRequest(channel=channel_entity, participant=user_id))
+            await new_bot(GetParticipantRequest(channel=channel_entity, participant=user_id))
             return True
-        except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError):
+        except (UserNotParticipantError, ChannelPrivateError, ChatAdminRequiredError, ValueError, TypeError) as e:
+            logging.error(f"Error checking membership for user {user_id}: {str(e)}")
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error checking membership for user {user_id}: {str(e)}")
             return False
 
     async def check_membership(event):
@@ -123,7 +140,7 @@ async def main():
     # ----------- BOT COMMANDS (ADMIN BOT) -----------
     @bot.on(events.NewMessage(pattern=r'/genapikey (\d+) (\d+)'))
     async def gen_apikey(event):
-        if event.sender_id != admin_id:
+        if event.sender_id != owner_id:
             return
         duration_days, max_requests = map(int, event.raw_text.split()[1:])
         key = uuid.uuid4().hex[:16]
@@ -140,7 +157,7 @@ async def main():
 
     @bot.on(events.NewMessage(pattern=r'/blockapikey (.+)'))
     async def block_apikey(event):
-        if event.sender_id != admin_id:
+        if event.sender_id != owner_id:
             return
         key = event.raw_text.split()[1]
         with db_lock:
@@ -153,7 +170,7 @@ async def main():
 
     @bot.on(events.NewMessage(pattern='/users'))
     async def list_users(event):
-        if event.sender_id != admin_id:
+        if event.sender_id != owner_id:
             return
         with db_lock:
             conn = get_db_connection()
@@ -168,7 +185,7 @@ async def main():
 
     @bot.on(events.NewMessage(pattern=r'/broadcast (.+)'))
     async def broadcast_handler(event):
-        if event.sender_id != admin_id:
+        if event.sender_id != owner_id:
             return
         message = event.raw_text.split(maxsplit=1)[1]
         with db_lock:
