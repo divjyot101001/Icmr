@@ -24,7 +24,7 @@ logging.basicConfig(
 
 api_id = 26973152
 api_hash = '3359532bba54756f12424148064e3e4d'
-session_string = "your_user_session_string_here"  # Paste your user session string here
+session_string = None  # Paste your user session string here
 group_username = '@wvizgseisbxuodebwydoxn'
 sherlok_username = '@Sherlok7777bot'
 paradox_username = '@paradoxbomber_bot'
